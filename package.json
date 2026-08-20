@@ -1,0 +1,71 @@
+{
+  "name": "@zakkster/lite-rain",
+  "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
+  "version": "1.0.0",
+  "description": "Zero-GC, SoA environmental rain engine with Z-depth parallax, streak physics, splash metamorphosis, terminal velocity bounds, and precomputed render buckets for high-performance cinematic rain effects.",
+  "type": "module",
+  "main": "./RainEngine.js",
+  "module": "/RainEngine.js",
+  "types": "./RainEngine.d.ts",
+  "exports": {
+    ".": {
+      "types": "./RainEngine.d.ts",
+      "node": "./RainEngine.js",
+      "import": "./RainEngine.js",
+      "default": "./RainEngine.js"
+    }
+  },
+  "files": [
+    "RainEngine.js",
+    "RainEngine.d.ts",
+    "llms.txt",
+    "README.md"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/PeshoVurtoleta/lite-rain#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PeshoVurtoleta/lite-rain.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PeshoVurtoleta/lite-rain/issues",
+    "email": "shinikchiev@yahoo.com"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/PeshoVurtoleta"
+  },
+  "dependencies": {
+    "@zakkster/lite-color": "^1.0.5"
+  },
+  "keywords": [
+    "rain",
+    "weather",
+    "environment",
+    "particle-engine",
+    "particle-system",
+    "streaks",
+    "splash",
+    "z-depth",
+    "parallax",
+    "motion-blur",
+    "oklch",
+    "zero-gc",
+    "soa",
+    "terminal-velocity",
+    "canvas",
+    "2d",
+    "vfx",
+    "micro-vfx",
+    "javascript",
+    "typescript",
+    "zakkster",
+    "lite-engine"
+  ],
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

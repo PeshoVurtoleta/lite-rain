@@ -1,0 +1,47 @@
+# @zakkster/lite-rain
+
+> Zero-GC SoA environmental rain engine. Z-depth parallax, streak physics, splash metamorphosis, bucketed rendering. One dependency.
+
+## Install
+npm i @zakkster/lite-rain
+
+## Dependencies
+@zakkster/lite-color (OKLCH → CSS string conversion)
+
+## Import
+import { RainEngine } from '@zakkster/lite-rain';
+
+## Key Facts
+- 12 SoA arrays: x, y, vx, vy, z, gz, wz, bucket, radius, tailMult, life, state
+- Precomputed per-drop: gz[]=gravity*z, wz[]=wind*z, tailMult[]=blur*z, bucket[]
+- Two-phase lifecycle: streak (state=1) falls → hits floor → splash (state=2) fades
+- Z-depth parallax: every physics/render param scales by depth (0.2–1.0)
+- 3 render buckets: one ctx.stroke() per depth tier (far/mid/near) — batched drawing
+- Terminal velocity clamping (depth-scaled)
+- Responsive density: spawn count scales with canvas area
+- Splash metamorphosis: streak → splash with bounce, radius from impact velocity
+- invSplashLifeMax computed once per frame (not per particle)
+- No clearRect — rain is an overlay effect. Caller clears their scene first.
+- spawn() and updateAndDraw() are separate calls — caller controls spawn timing
+- Pre-parsed OKLCH color in constructor
+- RNG injectable, no lite-random dep
+- No canvas ownership — pure engine takes (ctx, dt, w, h)
+- destroy() nulls 12 arrays
+
+## API
+- new RainEngine(maxParticles?, config?)
+- .spawn(dt, w, h) — spawn new drops (call every frame)
+- .updateAndDraw(ctx, dt, w, h) — physics + render (call every frame after spawn)
+- .clear() — kill all particles
+- .destroy() — release all arrays
+
+## Config
+gravity (1500), wind (200), density (5.0), maxSpeed (2500), blurStrength (0.04),
+splashBounce (0.25), splashSpread (200), splashLifeMin (0.1), splashLifeMax (0.3),
+angle (null), color ('oklch(0.95 0.05 250)'), rng (Math.random)
+
+## Game Loop Pattern
+rain.spawn(dt, w, h);
+ctx.clearRect(0, 0, w, h);      // caller clears
+drawScene();                      // caller draws scene
+rain.updateAndDraw(ctx, dt, w, h); // rain overlays on top
