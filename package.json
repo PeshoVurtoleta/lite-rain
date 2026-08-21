@@ -1,7 +1,7 @@
 {
   "name": "@zakkster/lite-rain",
   "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Zero-GC, SoA environmental rain engine with Z-depth parallax, streak physics, splash metamorphosis, terminal velocity bounds, and precomputed render buckets for high-performance cinematic rain effects.",
   "type": "module",
   "main": "./RainEngine.js",
@@ -19,7 +19,8 @@
     "RainEngine.js",
     "RainEngine.d.ts",
     "llms.txt",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "license": "MIT",
   "homepage": "https://github.com/PeshoVurtoleta/lite-rain#readme",
@@ -36,7 +37,7 @@
     "url": "https://github.com/sponsors/PeshoVurtoleta"
   },
   "dependencies": {
-    "@zakkster/lite-color": "^1.0.5"
+    "@zakkster/lite-color": "^2.1.0"
   },
   "keywords": [
     "rain",
@@ -63,9 +64,12 @@
     "lite-engine"
   ],
   "devDependencies": {
-    "vitest": "^3.0.0"
+    "@zakkster/lite-gc-profiler": "^1.15.1",
+    "@zakkster/lite-leak": "^1.8.1"
   },
   "scripts": {
-    "test": "vitest run"
+    "test": "node --expose-gc --test test/*.test.js",
+    "torture": "node --expose-gc test/torture.mjs",
+    "verify": "npm test && npm run torture"
   }
 }
