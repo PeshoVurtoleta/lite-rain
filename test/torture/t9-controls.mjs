@@ -11,7 +11,8 @@
  */
 
 import { RainEngine } from '../../RainEngine.js';
-import { runOpsGate, die, makeCtx } from './harness.mjs';
+import { runOpsGate, die, makeCtx, makePrng, SEED } from './harness.mjs';
+import { makeLogCtx, refRender, sortedEqual } from './t5-fuzz.mjs';
 
 /** Retained sink so the control's allocations survive GC (arrayBuffers grows). */
 const leak = [];
@@ -118,6 +119,56 @@ export function run() {
         if (e.liveCount() !== e.max) {
             die('T9 control: age-cap-disabled frozen drops drained (' + e.liveCount() +
                 '/' + e.max + ') -- the T3 age-cap gate cannot fail');
+        }
+    }
+
+    // Control 6 -- the T5 draw-set-identity gate (R-08 binning). Prove the SORTED
+    // multiset comparison catches a binning pass that draws a drop a full scan does
+    // not. First establish the honest baseline (binned render == full scan) on a
+    // live pool, then inject one extra streak record for a CULLED (state 0) slot --
+    // exactly what "binning a culled drop" would emit -- and assert the comparison
+    // now flags a divergence. A comparison that still returns equal is decorative.
+    {
+        // The draw-set control needs a live-but-not-saturated pool: all three
+        // streak buckets AND at least one splash populated (a non-vacuous baseline)
+        // while a free state-0 slot is guaranteed to exist for the forge below. A
+        // 4000-slot pool at density 5 settles to ~35% occupancy (steady-state
+        // occupancy ~= spawn-rate x lifetime, well under 4000), so it provably
+        // under-fills. Seeded rng gives the harness's deterministic/replayable
+        // discipline; wrap the uint32 PRNG into the engine's [0, 1) rng contract
+        // exactly as T5/T8 do -- a raw uint32 rng would poison z/x to billion scale.
+        const prng = makePrng(SEED);
+        const e = new RainEngine(4000, {
+            density: 5, gravity: 1500, wind: 300, color: '#fff',
+            rng: () => prng() / 4294967296,
+        });
+        for (let f = 0; f < 70; f++) { e.spawn(0.016, 800, 600); e.updateAndDraw(ctx, 0.016, 800, 600); }
+        if (e.liveCount() >= e.max) {
+            die('T9 control: pool saturated at steady state (' + e.liveCount() + '/' + e.max +
+                ') -- the draw-set control needs a free slot to forge');
+        }
+
+        const binLog = [];
+        e.updateAndDraw(makeLogCtx(binLog), 0.016, 800, 600);
+        const refLog = [];
+        refRender(e, makeLogCtx(refLog));
+        if (!sortedEqual(binLog, refLog)) {
+            die('T9 control: honest binned render already diverged from the full scan -- ' +
+                'the draw-set baseline is not clean (binned=' + binLog.length +
+                ' reference=' + refLog.length + ')');
+        }
+
+        // Find a culled/free slot and forge the record a broken binning pass would
+        // emit for it (drawing a state-0 drop as a streak).
+        let dead = -1;
+        for (let i = 0; i < e.max; i++) if (e.state[i] === 0) { dead = i; break; }
+        if (dead === -1) die('T9 control: pool fully saturated -- no culled slot to forge');
+        const forged = binLog.slice();
+        forged.push('S ga=0.18 lw=0.6 ' + e.x[dead] + ',' + e.y[dead] +
+            ' -> ' + e.x[dead] + ',' + e.y[dead]);
+        if (sortedEqual(forged, refLog)) {
+            die('T9 control: the draw-set comparison accepted a binned render that drew a ' +
+                'culled drop -- the T5 draw-set gate cannot fail');
         }
     }
 }

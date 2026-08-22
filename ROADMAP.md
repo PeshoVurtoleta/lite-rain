@@ -376,6 +376,30 @@ PURPOSE
   (R-07), scans it 4x to render (R-08), re-reads config per particle (R-09),
   recomputes area per spawn (R-05), and over-spawns off-screen under wind (R-04).
   None corrupts; all cost frames. This is the polish release, gated by a bench.
+  All six findings re-confirmed present against v1.1.0 on 2026-08-21 (dim cache
+  still absent; spawn still O(max); render still scans the pool 4x; windOffset
+  still unclamped for finite gravity; config still re-read per particle; splash
+  constants still hardcoded).
+
+R1 INTERACTIONS (the hot paths R2 rewrites now carry R1's cull + age cap -- do
+not regress them):
+  - **The binning pass runs INSIDE the state-1 physics loop, AFTER R1's
+    cull/age-cap.** Order per drop: integrate -> `y>=h` splash -> else NaN-safe
+    positional cull -> else age-cap (`(life-=dt)<=0`) -> else bin its index into
+    the bucket list. A drop culled or aged-out this frame must NOT be binned or
+    drawn. R-08 collects LIVE indices only; it never resurrects the 4x scan's
+    "check state each pass" as an excuse to skip the cull.
+  - **The ring cursor changes SLOT ASSIGNMENT, so the T8 snapshot re-baselines
+    at R2** (see the corrected determinism assertion). Do not treat a byte-diff
+    vs the v1.1.0 slot layout as a regression -- the *draw set* must be identical,
+    the *slot indices* need not be.
+  - **R-04 must not undo R1's `gravity:0` guard.** R1 already sets
+    `windOffset = (g !== 0) ? (h/g)*|wind| : 0`. R2 clamps the non-zero branch to
+    a sane multiple of `w`; keep the `g===0 -> 0` fallback intact.
+  - **R-09 hoisting is safe because the R1 door froze config finiteness at
+    construction.** Document that mutating `config` mid-run is unsupported (no
+    re-validation on the hot path); a caller who must retune rebuilds or accepts
+    that hoisted locals lag by up to a frame.
 
 TASKS
   - **R-05 dimension cache.** `_lastW/_lastH/_areaModifier`; recompute only on a
@@ -408,10 +432,14 @@ ASSERTIONS
   - T6 passes at `maxArrayBuffersGrowth:0, stabilize:'deep'` over a 500k-op
     steady-state loop; the per-bucket index buffers and pool buffers do not grow
     (direct length/byteLength asserts).
-  - Render output is IDENTICAL to v1.1.0 across the T5 corpus -- the binning pass
-    changes iteration order, never the draw set (compare sorted draw-call logs
-    from the fake ctx).
-  - Determinism snapshot (T8) unchanged from v1.1.0.
+  - DRAW SET is IDENTICAL to v1.1.0 across the T5 corpus -- the binning pass and
+    ring cursor change iteration order and slot assignment, never WHICH drops are
+    drawn or their pixels. Compare SORTED draw-call logs from the fake ctx
+    (order-independent), NOT a position-by-position array diff.
+  - Determinism is engine-vs-engine: two R2 engines with the same seeded `rng`
+    produce byte-identical `x/y/vx/vy/state/life` snapshots. The ring cursor
+    deliberately changes slot layout, so the T8 golden snapshot is RE-BASELINED at
+    R2 (record the new baseline); it is NOT expected to byte-match v1.1.0's layout.
   - Bench: frame-time improvement recorded with provenance; <= 3% regression
     tolerated on any single metric only with a recorded justification.
   - torture "ok"; T9 control (an allocating render pass) fails.

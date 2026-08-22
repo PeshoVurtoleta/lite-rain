@@ -19,7 +19,7 @@ import { runOpsGate, BREAK, check, die, makeCtx, metrics } from './harness.mjs';
 
 const MAX = 4000;
 const W = 800, H = 600, DT = 0.016;
-const OPS = 40000;
+const OPS = 500000; // R2: 500k-op steady state (ROADMAP s.5 T6 assertion)
 const WARMUP = 4000;
 
 /** Retained sink for the BREAK control -- survives GC so arrayBuffers grows. */
@@ -35,6 +35,14 @@ export function run() {
     const buffers = [e.x, e.y, e.vx, e.vy, e.z, e.gz, e.wz, e.bucket, e.radius, e.tailMult, e.life, e.state];
     const bytesBefore = buffers.map((b) => b.buffer.byteLength);
 
+    // R-08 bin scratch: the three per-bucket streak index lists and the splash
+    // index list. These are the buffers the binning pass appends into every frame;
+    // a growth here (an accidental push/realloc) is the exact regression the direct
+    // length + byteLength asserts below must catch (the heap gate cannot see it).
+    const idxBuffers = [e._streakIdx[0], e._streakIdx[1], e._streakIdx[2], e._splashIdx];
+    const idxLenBefore = idxBuffers.map((b) => b.length);
+    const idxBytesBefore = idxBuffers.map((b) => b.buffer.byteLength);
+
     const hot = (i) => {
         e.spawn(DT, W, H);
         e.updateAndDraw(ctx, DT, W, H);
@@ -49,6 +57,17 @@ export function run() {
         const now = buffers[k].buffer.byteLength;
         check(now === bytesBefore[k],
             () => 'T6: pool buffer #' + k + ' grew ' + bytesBefore[k] + ' -> ' + now);
+    }
+
+    // R-08 direct asserts: the bin index lists never grow -- neither their element
+    // length nor their ArrayBuffer byteLength -- across a 500k-op steady state.
+    for (let k = 0; k < idxBuffers.length; k++) {
+        const nowLen = idxBuffers[k].length;
+        const nowBytes = idxBuffers[k].buffer.byteLength;
+        check(nowLen === idxLenBefore[k],
+            () => 'T6: bin index list #' + k + ' length grew ' + idxLenBefore[k] + ' -> ' + nowLen);
+        check(nowBytes === idxBytesBefore[k],
+            () => 'T6: bin index list #' + k + ' byteLength grew ' + idxBytesBefore[k] + ' -> ' + nowBytes);
     }
 
     // Record metrics for the final GATE line.

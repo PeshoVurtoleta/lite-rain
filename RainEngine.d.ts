@@ -27,6 +27,8 @@ export interface RainConfig {
     splashLifeMin?: number;
     /** Maximum splash lifetime in seconds. Must be finite. Default: 0.3 */
     splashLifeMax?: number;
+    /** Splash base radius scalar: radius = z * (splashScale + abs(vy)/2000). Must be finite. Default: 1.2 */
+    splashScale?: number;
     /** Fixed rain angle in radians. null = gravity + wind (natural). Finite when non-null. Default: null */
     angle?: number | null;
     /** Rain color as OKLCH object { l, c, h } or CSS string. Default: 'oklch(0.95 0.05 250)' */

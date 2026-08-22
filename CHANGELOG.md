@@ -2,6 +2,105 @@
 
 All notable changes to `@zakkster/lite-rain` are documented here.
 
+## [1.2.0] - 2026-08-21
+
+Performance / polish release. The internal work per frame is rewritten (single
+binning pass, ring-cursor allocation, hoisted config, dimension cache) with the
+DRAW SET held constant for R-05/R-07/R-08/R-09: the same drops are drawn with the
+same pixels; only iteration order and slot assignment change. The one deliberate
+visible change is R-04, which narrows the wind-driven spawn band so drops are
+born near-screen instead of far off it (documented below). The R1 off-screen
+cull, the 12s age cap, and the finite-config door are all intact.
+Proven by the torture harness (`node --expose-gc test/torture.mjs` -> `ok`,
+`alloc` ~0.09 B/op, `gc major=0`) and a build-once frame-time bench.
+
+### Changed
+
+- **Single binning pass (R-08).** `updateAndDraw` scanned the pool once to
+  integrate physics, then FOUR more times to render (three streak buckets +
+  splashes). It now bins each drop's index into one of three persistent per-bucket
+  `Uint32Array` streak lists or a `Uint32Array` splash list DURING the single
+  physics pass -- appended only AFTER the drop's transitions resolve and keyed on
+  its FINAL state this frame. The render then walks ONLY the binned live indices,
+  never `0..max` again. A drop culled or aged-out this frame is state 0 and is
+  never binned or drawn (the R1 cull/age-cap order is preserved: integrate ->
+  floor-splash -> positional cull -> age cap -> bin). The four index buffers are
+  allocated once at construction and never grow (asserted directly by T6).
+- **Ring-cursor allocator (R-07).** `spawn` scanned from index 0 every call. It
+  now scans from a persisted `_spawnCursor` and wraps, bounded to exactly `max`
+  probes so a FULL pool still terminates in one lap. Low-occupancy spawn is now
+  O(spawned) amortized instead of O(max). **This changes SLOT ASSIGNMENT** -- the
+  same drops with the same trajectories land in different slots. The draw set and
+  every pixel are unchanged; only iteration order and slot indices differ.
+- **Dimension cache (R-05).** `spawn` recomputes `areaModifier = (w*h)/100000`
+  only when `(w, h)` changes, from cached `_lastW/_lastH/_areaModifier`.
+- **Hoisted config reads (R-09).** `updateAndDraw` and `spawn` lift loop-invariant
+  `config` reads (`angle`, `maxSpeed`, `splashBounce`, `splashSpread`,
+  `splashLifeMin/Max`, `splashScale`, `rng`, `gravity`/`wind`) and derived
+  constants (`cos`/`sin` of a fixed angle, the spawn window) to frame-top locals.
+  This is safe because the R1 door froze config finiteness at construction:
+  **mutating `config` mid-run is unsupported** -- the hoisted locals lag a live
+  config edit by up to a frame; a caller who must retune rebuilds the engine.
+
+### Added
+
+- **`splashScale` config (R-10), default `1.2`.** Splash radius is
+  `z * (splashScale + abs(vy)/2000)`; the default preserves the exact prior radius
+  (the `1.2` base was hardcoded). Validated by the finite-config door and read once
+  per frame, not per splash.
+- **`bench/bench.mjs` + `npm run bench`.** Builds one engine, runs N frames at a
+  fixed dt over a fake ctx, and reports frame-time p50/p90/p99 with a provenance
+  stamp (node version, seed, max, density, frames, occupancy, canvas, dt). Not
+  shipped (excluded from `files[]`; proven by `npm pack --dry-run`).
+
+### Fixed
+
+- **Unclamped wind spawn window (R-04).** The wind-driven spawn band was
+  `windOffset = (g !== 0) ? (h/g)*|wind| : 0`, which under strong wind on weak
+  gravity spawned drops arbitrarily far off-screen (pure overdraw -- the R1 cull
+  recycled them the next frame, but only after wasting a spawn slot and an
+  integration). The non-zero branch is now clamped to a sane multiple of `w`:
+  `Math.min((h/g)*|wind|, w)`, so drops are born near-screen. **Interaction with
+  R1:** the `g === 0 -> 0` fallback (R1's Infinity guard) is unchanged, and the R1
+  positional cull still recycles any drop that drifts off after birth -- the clamp
+  only stops the over-wide birth band, it does not replace the cull.
+
+### Performance
+
+Bench provenance: node `v26.3.1`, seed `2654435769`, `max=8000`, 20000 frames,
+1920x1080, `dt=0.01667`. Frame-time percentiles (ms), v1.1.0 -> v1.2.0:
+
+- Saturated pool (`density=30`, occupancy ~7900/8000):
+  p50 `0.1798 -> 0.1168` (-35%), p90 `0.1923 -> 0.1258` (-35%),
+  p99 `0.2537 -> 0.1457` (-43%).
+- Low occupancy (`density=2`, occupancy ~3200/8000):
+  p50 `0.0772 -> 0.0435` (-44%), p90 `0.0821 -> 0.0475` (-42%),
+  p99 `0.1637 -> 0.0565` (-65%). The binning pass shows the biggest full-frame win
+  at low occupancy, where the old 4x render scan walked the empty pool tail.
+
+No metric regressed. (Occupancy shifts by a handful of drops because the ring
+cursor and the R-04 clamp change slot layout and the birth band; the draw set is
+proven identical to a full-scan render of the same pool by torture tier T5.)
+
+### Testing
+
+- **Torture T5 (fuzz vs oracle) filled.** A seeded mixed spawn/update/clear corpus
+  across six force fields runs against an independent scan oracle (every live drop
+  finite and on a plausible trajectory). A DRAW-SET-IDENTICAL check logs the
+  engine's binned draw calls and asserts the SORTED multiset equals a reference
+  full-scan render of the same committed pool -- the binning pass and ring cursor
+  change iteration order and slot assignment, never WHICH drops are drawn.
+- **Torture T6 widened.** Alongside the heap gate over a 500k-op steady state, the
+  three streak index buffers and the splash index buffer now have direct
+  `length` + `byteLength` before/after asserts (ArrayBuffer backing stores are
+  invisible to a heapUsed gate).
+- **Torture T8 re-baselined engine-vs-engine.** Two R2 engines fed the same seeded
+  rng produce byte-identical `x/y/vx/vy/state/life` snapshots. The ring cursor
+  deliberately changes slot layout, so the golden is NOT expected to match the
+  v1.1.0 position-by-position layout.
+- **T9 control added.** A forged binned render that draws a culled (state 0) drop
+  must fail the T5 draw-set comparison -- proving that gate can bite.
+
 ## [1.1.0] - 2026-08-21
 
 Correctness release. Two silent-corruption bugs (S1) and two contract gaps (S3)
