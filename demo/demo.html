@@ -1,11 +1,25 @@
 <!DOCTYPE html>
+<!--
+  Serve from the PACKAGE ROOT, not this folder, so ../node_modules resolves:
+      python3 -m http.server
+  then open http://localhost:8000/demo/demo.html
+  ES modules will not load over file:// -- a static server is required.
+-->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>lite-rain Pro Environment</title>
+    <title>lite-rain -- environment demo</title>
+    <script type="importmap">
+    {
+      "imports": {
+        "@zakkster/lite-rain": "../RainEngine.js",
+        "@zakkster/lite-color": "../node_modules/@zakkster/lite-color/Color.js"
+      }
+    }
+    </script>
     <style>
-        body, html {
+        html, body {
             margin: 0;
             padding: 0;
             width: 100%;
@@ -13,195 +27,280 @@
             overflow: hidden;
             background-color: #060913;
             font-family: system-ui, sans-serif;
-            color: #fff;
+            color: #ffffff;
         }
 
-        canvas {
+        #stage {
             display: block;
             width: 100%;
             height: 100%;
             position: absolute;
-            top: 0;
-            left: 0;
+            inset: 0;
             z-index: 1;
         }
 
         #panel {
             position: absolute;
-            top: 20px;
-            right: 20px;
+            top: 1.25rem;
+            right: 1.25rem;
             z-index: 10;
-            width: 320px;
-            background: rgba(10, 15, 25, 0.8);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            padding: 20px;
-            border-radius: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+            width: 20rem;
+            background: #0a0f19cc;
+            background: color-mix(in oklab, #0a0f19 80%, transparent);
+            backdrop-filter: blur(1rem);
+            -webkit-backdrop-filter: blur(1rem);
+            padding: 1.25rem;
+            border-radius: 1rem;
+            border: 1px solid #ffffff0d;
+            box-shadow: 0 1rem 2.5rem #000000cc;
         }
 
         h2 {
-            margin: 0 0 15px 0;
-            font-size: 16px;
+            margin: 0 0 0.9rem 0;
+            font-size: 1rem;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 0.06rem;
             color: #8899cc;
         }
 
-        .control-group {
-            margin-bottom: 16px;
+        .group {
+            margin-bottom: 1rem;
         }
 
         label {
             display: flex;
             justify-content: space-between;
-            font-size: 12px;
-            margin-bottom: 6px;
+            font-size: 0.75rem;
+            margin-bottom: 0.4rem;
             font-weight: 600;
             color: #ccddee;
         }
 
         input[type=range] {
             width: 100%;
-            margin-bottom: 5px;
+            margin-bottom: 0.3rem;
             accent-color: #00eeff;
         }
 
         .presets {
-            display: flex;
-            gap: 8px;
-            margin-top: 24px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            margin-top: 1.25rem;
         }
 
         button {
-            flex: 1;
             background: #1a233a;
             color: #8899cc;
             border: 1px solid #2a3550;
-            padding: 10px;
-            border-radius: 8px;
+            padding: 0.6rem;
+            border-radius: 0.5rem;
             cursor: pointer;
-            font-size: 12px;
+            font-size: 0.75rem;
             font-weight: 700;
             transition: 0.2s;
         }
 
-        button:hover {
-            background: #2a3550;
-            color: #fff;
+        button.wide {
+            grid-column: 1 / -1;
+        }
+
+        @media (hover: hover) {
+            button:hover {
+                background: #2a3550;
+                color: #ffffff;
+            }
         }
 
         button.active {
             background: #00eeff;
-            color: #000;
+            color: #000000;
             border-color: #00eeff;
-            box-shadow: 0 0 15px rgba(0, 238, 255, 0.3);
+            box-shadow: 0 0 0.9rem #00eeff4d;
+        }
+
+        #stat {
+            margin-top: 1.25rem;
+            font-size: 0.75rem;
+            font-variant-numeric: tabular-nums;
+            color: #7fd3ff;
+            white-space: pre;
+            line-height: 1.5;
         }
     </style>
 </head>
 <body>
 
 <div id="panel">
-    <h2>Weather Control Matrix</h2>
+    <h2>lite-rain environment</h2>
 
-    <div class="control-group">
-        <label>Density (Drops/Area) <span id="denVal">5.0</span></label>
-        <input type="range" id="density" min="1" max="25" step="1" value="5">
+    <div class="group">
+        <label>Density <span id="densityVal">5</span></label>
+        <input type="range" id="density" min="1" max="30" step="1" value="5">
     </div>
 
-    <div class="control-group">
-        <label>Wind Velocity <span id="windVal">200</span></label>
+    <div class="group">
+        <label>Wind <span id="windVal">200</span></label>
         <input type="range" id="wind" min="-1200" max="1200" step="50" value="200">
     </div>
 
-    <div class="control-group">
-        <label>Gravity (Terminal Vel) <span id="gravVal">1500</span></label>
+    <div class="group">
+        <label>Gravity <span id="gravityVal">1500</span></label>
         <input type="range" id="gravity" min="500" max="4000" step="100" value="1500">
     </div>
 
-    <div class="presets">
-        <button id="btnDrizzle">Drizzle</button>
-        <button id="btnStorm" class="active">Storm</button>
-        <button id="btnSquall">Squall</button>
+    <div class="group">
+        <label>Gust <span id="gustVal">0</span></label>
+        <input type="range" id="gust" min="0" max="600" step="25" value="0">
     </div>
+
+    <div class="presets">
+        <button id="p-drizzle" data-scene="drizzle">Drizzle</button>
+        <button id="p-steady" data-scene="steady" class="active">Steady</button>
+        <button id="p-downpour" data-scene="downpour">Downpour</button>
+        <button id="p-storm" data-scene="storm">Storm (slant + gust)</button>
+        <button id="p-ripple" data-scene="ripple" class="wide">Droplet + Ripple stress</button>
+    </div>
+
+    <div id="stat"></div>
 </div>
 
 <canvas id="stage"></canvas>
 
 <script type="module">
-    import {RainEngine} from 'https://esm.run/@zakkster/lite-rain@1.0.0';
+    import { RainEngine, RAIN_PRESETS } from '@zakkster/lite-rain';
 
-    // --- APP WIRING ---
-    const canvas = document.getElementById('stage');
-    const ctx = canvas.getContext('2d', {alpha: false}); // Optimization for full-screen opaque bg
-    const engine = new RainEngine();
+    // --- cached DOM (lite-law: look up once, never in a handler or the loop) ---
+    const $canvas = document.getElementById('stage');
+    const $ctx = $canvas.getContext('2d', { alpha: false });
+    const $density = document.getElementById('density');
+    const $wind = document.getElementById('wind');
+    const $gravity = document.getElementById('gravity');
+    const $gust = document.getElementById('gust');
+    const $densityVal = document.getElementById('densityVal');
+    const $windVal = document.getElementById('windVal');
+    const $gravityVal = document.getElementById('gravityVal');
+    const $gustVal = document.getElementById('gustVal');
+    const $stat = document.getElementById('stat');
+    const $btns = Array.prototype.slice.call(document.querySelectorAll('.presets button'));
 
-    let w = 0, h = 0;
+    // A single cached text node for the frame-time readout. The loop writes its
+    // .nodeValue -- it never reads layout to produce the string.
+    const statNode = document.createTextNode('');
+    $stat.appendChild(statNode);
+
+    const MAX = 12000;
     const dpr = window.devicePixelRatio || 1;
 
-    function updateSize() {
-        w = window.innerWidth;
+    // Cached logical dimensions. Written ONLY by the debounced resize handler
+    // (which is where the single layout read lives), read by the loop.
+    let w = 0, h = 0;
+
+    // Extra non-preset scenes, keyed by data-scene. Presets come from RAIN_PRESETS.
+    const RIPPLE_SCENE = { gravity: 2000, wind: 250, density: 16, splashSpread: 260,
+                           splashDroplets: 3, ripples: true };
+
+    function sceneConfig(name) {
+        if (name === 'ripple') return RIPPLE_SCENE;
+        return RAIN_PRESETS[name];
+    }
+
+    // The engine is REBUILT on every scene switch. ripples allocates its ring only
+    // at construction, so a rebuild is the correct way to turn the feature on/off,
+    // and it guarantees a switch never throws on a live-mutated strict-boolean key.
+    let engine = new RainEngine(MAX, { ...RAIN_PRESETS.steady });
+
+    function syncSlidersFromEngine() {
+        const c = engine.config;
+        $density.value = c.density;
+        $wind.value = c.wind;
+        $gravity.value = c.gravity;
+        $gust.value = c.gust;
+        $densityVal.textContent = c.density;
+        $windVal.textContent = c.wind;
+        $gravityVal.textContent = c.gravity;
+        $gustVal.textContent = c.gust;
+    }
+
+    function selectScene(name, btn) {
+        for (let i = 0; i < $btns.length; i++) $btns[i].classList.remove('active');
+        if (btn) btn.classList.add('active');
+        const old = engine;
+        engine = new RainEngine(MAX, { ...sceneConfig(name) });
+        old.destroy();
+        syncSlidersFromEngine();
+    }
+
+    for (let i = 0; i < $btns.length; i++) {
+        const b = $btns[i];
+        b.addEventListener('click', () => selectScene(b.dataset.scene, b));
+    }
+
+    // Live sliders mutate the current engine's config in place (all finite numeric
+    // keys -- safe live). Labels update in the handler, never in the loop.
+    $density.addEventListener('input', () => {
+        const v = +$density.value; engine.config.density = v; $densityVal.textContent = v;
+    });
+    $wind.addEventListener('input', () => {
+        const v = +$wind.value; engine.config.wind = v; $windVal.textContent = v;
+    });
+    $gravity.addEventListener('input', () => {
+        const v = +$gravity.value; engine.config.gravity = v; $gravityVal.textContent = v;
+    });
+    $gust.addEventListener('input', () => {
+        const v = +$gust.value; engine.config.gust = v; $gustVal.textContent = v;
+    });
+
+    // --- resize: the ONLY place a layout property is read. Debounced across a rAF
+    // boundary so a resize storm collapses to one measure + one canvas resize. ---
+    let resizeQueued = false;
+    function measure() {
+        resizeQueued = false;
+        w = window.innerWidth;                 // the single layout READ
         h = window.innerHeight;
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.scale(dpr, dpr);
+        $canvas.width = w * dpr;               // canvas sizing WRITE (no read after)
+        $canvas.height = h * dpr;
+        $ctx.setTransform(1, 0, 0, 1, 0, 0);
+        $ctx.scale(dpr, dpr);
     }
+    window.addEventListener('resize', () => {
+        if (resizeQueued) return;
+        resizeQueued = true;
+        requestAnimationFrame(measure);
+    });
+    measure();
+    syncSlidersFromEngine();
 
-    window.addEventListener('resize', updateSize);
-    updateSize();
-
-    // UI Controls
-    const dom = {
-        den: document.getElementById('density'), denVal: document.getElementById('denVal'),
-        wind: document.getElementById('wind'), windVal: document.getElementById('windVal'),
-        grav: document.getElementById('gravity'), gravVal: document.getElementById('gravVal'),
-        btns: [document.getElementById('btnDrizzle'), document.getElementById('btnStorm'), document.getElementById('btnSquall')]
-    };
-
-    function updateUI() {
-        dom.denVal.innerText = dom.den.value + '.0';
-        dom.windVal.innerText = dom.wind.value;
-        dom.gravVal.innerText = dom.grav.value;
-        engine.config.density = parseFloat(dom.den.value);
-        engine.config.wind = parseFloat(dom.wind.value);
-        engine.config.gravity = parseFloat(dom.grav.value);
-    }
-
-    [dom.den, dom.wind, dom.grav].forEach(el => el.addEventListener('input', updateUI));
-
-    function switchPreset(btn, den, wind, grav) {
-        dom.btns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        dom.den.value = den;
-        dom.wind.value = wind;
-        dom.grav.value = grav;
-        updateUI();
-    }
-
-    document.getElementById('btnDrizzle').onclick = (e) => switchPreset(e.target, 2, 20, 800);
-    document.getElementById('btnStorm').onclick = (e) => switchPreset(e.target, 6, 200, 1500);
-    document.getElementById('btnSquall').onclick = (e) => switchPreset(e.target, 20, 900, 3000);
-
-    // Loop
-    let lastTime = performance.now();
+    // --- frame loop: reads NO layout. Cached w/h, canvas draws, and one throttled
+    // text write. Frame-time is smoothed (EMA) and printed at ~7.5Hz via a mask. ---
+    let last = performance.now();
+    let emaMs = 0;
+    let frame = 0;
 
     function loop(time) {
-        const dt = Math.min((time - lastTime) / 1000, 0.1);
-        lastTime = time;
+        const dt = Math.min((time - last) / 1000, 0.1);
+        last = time;
 
-        // Manual clear rect with background color to utilize opaque canvas performance
-        ctx.fillStyle = '#060913';
-        ctx.fillRect(0, 0, w, h);
-
+        const t0 = performance.now();
         engine.spawn(dt, w, h);
-        engine.updateAndDraw(ctx, dt, w, h);
+
+        $ctx.fillStyle = '#060913';
+        $ctx.fillRect(0, 0, w, h);
+        engine.updateAndDraw($ctx, dt, w, h);
+        const workMs = performance.now() - t0;
+
+        emaMs = emaMs === 0 ? workMs : emaMs + (workMs - emaMs) * 0.1;
+
+        // ~7.5Hz telemetry. toFixed is fine here (throttled), never per raw frame.
+        if ((frame++ & 7) === 0) {
+            statNode.nodeValue =
+                'frame ' + emaMs.toFixed(3) + ' ms\n' +
+                'live  ' + engine.liveCount() + ' / ' + MAX;
+        }
 
         requestAnimationFrame(loop);
     }
-
     requestAnimationFrame(loop);
 </script>
 </body>

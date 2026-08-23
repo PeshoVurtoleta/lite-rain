@@ -6,7 +6,7 @@
 
 import { toCssOklch } from '@zakkster/lite-color';
 
-export const VERSION = '1.3.0';
+export const VERSION = '1.4.0';
 
 /** Documented ceiling for maxParticles. Above this, the constructor throws. */
 export const MAX_PARTICLES = 2000000;

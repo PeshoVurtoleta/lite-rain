@@ -241,8 +241,8 @@ test('R-13 constructor: bad maxParticles throws a library RangeError', () => {
     assert.doesNotThrow(() => new RainEngine(1));
 });
 
-test('VERSION is exported and matches 1.3.0', () => {
-    assert.equal(VERSION, '1.3.0');
+test('VERSION is exported and matches 1.4.0', () => {
+    assert.equal(VERSION, '1.4.0');
 });
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-# @zakkster/lite-rain v1.3.0
+# @zakkster/lite-rain v1.4.0
 
 > Zero-GC SoA environmental rain engine. Z-depth parallax, streak physics, splash metamorphosis, bucketed rendering. One dependency.
 
@@ -23,6 +23,12 @@ import { RainEngine } from '@zakkster/lite-rain';
 - Responsive density: spawn count scales with canvas area
 - Splash metamorphosis: streak -> splash with bounce, radius from impact velocity
 - invSplashLifeMax computed once per frame (not per particle)
+- Wind gust: vx += sin(_elapsed*gustRate)*gust*dt, computed once per frame at frame top (0 when gust:0); _elapsed advances unconditionally (determinism)
+- Splash floor folded into one fy local: fy = floorY !== null ? floorY : h (default null = frame height h)
+- splashDroplets (0..3): extra state-2 droplets per impact into free slots via the shared spawn ring; OFF path bit-identical
+- ripples (strict bool): expanding ground rings in a pre-allocated 64-slot Float32 ring, aged/stroked in one path, allocated ONLY when ripples:true
+- 12s age cap (MAX_FALL_LIFE) backs the off-screen cull: bounds the pool under any finite field
+- RAIN_PRESETS export: frozen drizzle/steady/downpour/storm partial configs
 - No clearRect -- rain is an overlay effect. Caller clears their scene first.
 - spawn() and updateAndDraw() are separate calls -- caller controls spawn timing
 - Pre-parsed OKLCH color in constructor
@@ -31,18 +37,27 @@ import { RainEngine } from '@zakkster/lite-rain';
 - destroy() nulls 12 arrays
 
 ## API
-- new RainEngine(maxParticles?, config?) -- maxParticles integer in [1, MAX_PARTICLES=2000000]; non-finite config throws RangeError naming the key
+- new RainEngine(maxParticles?, config?) -- maxParticles integer in [1, MAX_PARTICLES=2000000] (default 8000); non-finite force config throws RangeError naming the key; splashDroplets int [0,3]; ripples strict boolean; floorY finite-or-null
 - .spawn(dt, w, h) -- spawn new drops (call every frame)
-- .updateAndDraw(ctx, dt, w, h) -- physics + render (call every frame after spawn)
+- .updateAndDraw(ctx, dt, w, h) -- physics + render (call every frame after spawn); does NOT clear the canvas
 - .liveCount() -- O(max) count of live particles (state != 0); test/debug telemetry
 - .clear() -- kill all particles
 - .destroy() -- release all arrays
 - export const VERSION, MAX_PARTICLES
+- export const RAIN_PRESETS -- frozen partial configs: drizzle, steady, downpour, storm
 
 ## Config
 gravity (1500), wind (200), density (5.0), maxSpeed (2500), blurStrength (0.04),
 splashBounce (0.25), splashSpread (200), splashLifeMin (0.1), splashLifeMax (0.3),
-angle (null), color ('oklch(0.95 0.05 250)'), rng (Math.random)
+splashScale (1.2), angle (null), gust (0), gustRate (fround(2*PI/3) ~3s period),
+floorY (null), splashDroplets (0, int 0..3), ripples (false, strict bool),
+color ('oklch(0.95 0.05 250)' | {l,c,h}), rng (Math.random)
+
+## Presets (RAIN_PRESETS, frozen partial configs)
+drizzle  { gravity: 900, wind: 80, density: 2, maxSpeed: 1500 }
+steady   { gravity: 1500, wind: 200, density: 5 }
+downpour { gravity: 2000, wind: 350, density: 14, splashSpread: 260 }
+storm    { gravity: 2200, wind: 1200, angle: 0.4, gust: 300, density: 22, splashSpread: 320 }
 
 ## Game Loop Pattern
 rain.spawn(dt, w, h);

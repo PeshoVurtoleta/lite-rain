@@ -2,6 +2,39 @@
 
 All notable changes to `@zakkster/lite-rain` are documented here.
 
+## [1.4.0] - 2026-08-23
+
+Docs and demo release. No engine change; the API surface is identical to 1.3.0.
+
+### Added
+
+- **Worker + OffscreenCanvas recipe** in the README: an inlined main-thread /
+  Worker pair that transfers the canvas once and runs the frame loop off the main
+  thread.
+- **Mermaid lifecycle diagram** in the README: the `free -> falling -> splash ->
+  free` state machine, the off-screen/age-cap cull edge, and the ripple side-track.
+
+### Changed
+
+- **README rebuilt on the LiteSepforge blueprint spine.** Positioning H2, TOC, why
+  this exists, what you get, a SoA-pool + streak/splash lifecycle deep-dive, a full
+  API reference with a config constants table and a `RAIN_PRESETS` table (the four
+  presets' real values), composability (game loop + snow/confetti co-render), a
+  zero-GC design-notes section with an allocation table, the committed torture
+  numbers, and a `bench/bench.mjs` frame-time provenance table.
+- **`llms.txt` `## Config` and `## API` regenerated** to the 1.3.0 surface: the R3
+  knobs (`gust`, `gustRate`, `floorY`, `splashDroplets`, `ripples`), `splashScale`,
+  and the `RAIN_PRESETS` export.
+- **`demo/demo.html` rebuilt.** Imports the local `../RainEngine.js` (not a stale
+  CDN pin); a preset switcher wired to all four `RAIN_PRESETS`, the slanted `storm`
+  scene (`angle` + `gust`), and a droplet/ripple stress scene with a live frame-time
+  readout. The rAF loop reads no layout: dimensions are cached by a debounced resize
+  handler, and the readout writes a cached text node throttled to ~7.5Hz.
+- **ASCII law applied to `README.md` and `llms.txt`.** Em/en dashes, emoji,
+  variation selectors, the superscript-two, and the degree sign are gone (`->`,
+  `<=`, `x`, `^2`, "degrees"); `x` (U+00D7) is retained where multiplication is
+  meant.
+
 ## [1.3.0] - 2026-08-22
 
 Feature release, additive only. Four env knobs (`gust`, `floorY`, `splashDroplets`,
