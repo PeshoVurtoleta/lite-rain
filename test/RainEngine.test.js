@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RainEngine, VERSION, MAX_PARTICLES } from '../RainEngine.js';
+import { RainEngine, VERSION, MAX_PARTICLES, RAIN_PRESETS } from '../RainEngine.js';
 
 const ctx = {
     clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {},
-    arc() {}, stroke() {}, fill() {},
+    arc() {}, ellipse() {}, stroke() {}, fill() {},
     globalAlpha: 1, globalCompositeOperation: 'source-over',
     fillStyle: '', strokeStyle: '', lineWidth: 1, lineCap: 'butt',
 };
@@ -241,8 +241,8 @@ test('R-13 constructor: bad maxParticles throws a library RangeError', () => {
     assert.doesNotThrow(() => new RainEngine(1));
 });
 
-test('VERSION is exported and matches 1.2.0', () => {
-    assert.equal(VERSION, '1.2.0');
+test('VERSION is exported and matches 1.3.0', () => {
+    assert.equal(VERSION, '1.3.0');
 });
 
 // ---------------------------------------------------------------------------
@@ -685,4 +685,208 @@ test('MAX_FALL_LIFE boundary: degenerate low gravity on a tall canvas hits the a
     }
     assert.equal(e.state[idx], 0,
         'drop did not recycle via the age cap (state=' + e.state[idx] + ', y=' + e.y[idx] + ')');
+});
+
+// ---------------------------------------------------------------------------
+// R3 -- gust, floorY, splashDroplets, ripples, presets.
+// ---------------------------------------------------------------------------
+
+test('R3 door: NaN/Infinity gust and gustRate throw naming the key', () => {
+    assert.throws(() => new RainEngine(100, { gust: NaN }), /gust/);
+    assert.throws(() => new RainEngine(100, { gust: Infinity }), /gust/);
+    assert.throws(() => new RainEngine(100, { gustRate: NaN }), /gustRate/);
+    assert.throws(() => new RainEngine(100, { gustRate: -Infinity }), /gustRate/);
+    assert.doesNotThrow(() => new RainEngine(100, { gust: 300, gustRate: 0 }));
+});
+
+test('R3 door: non-finite floorY throws; null and finite (incl. negative) are accepted', () => {
+    assert.throws(() => new RainEngine(100, { floorY: NaN }), /floorY/);
+    assert.throws(() => new RainEngine(100, { floorY: Infinity }), /floorY/);
+    assert.throws(() => new RainEngine(100, { floorY: -Infinity }), /floorY/);
+    assert.doesNotThrow(() => new RainEngine(100, { floorY: null }));
+    assert.doesNotThrow(() => new RainEngine(100, { floorY: 400 }));
+    assert.doesNotThrow(() => new RainEngine(100, { floorY: -5 }));
+});
+
+test('R3 door: splashDroplets 2.5 / 4 / -1 / NaN throw; 0..3 accepted', () => {
+    for (const bad of [2.5, 4, -1, NaN, Infinity, 1.5]) {
+        assert.throws(() => new RainEngine(100, { splashDroplets: bad }), /splashDroplets/,
+            'splashDroplets=' + bad);
+    }
+    for (const good of [0, 1, 2, 3]) {
+        assert.doesNotThrow(() => new RainEngine(100, { splashDroplets: good }), 'splashDroplets=' + good);
+    }
+});
+
+test('R3 door: ripples is a STRICT boolean (non-boolean throws, incl. truthy 1 / falsy 0)', () => {
+    for (const bad of [1, 0, 'true', null, {}, NaN]) {
+        assert.throws(() => new RainEngine(100, { ripples: bad }), /ripples/, 'ripples=' + String(bad));
+    }
+    assert.doesNotThrow(() => new RainEngine(100, { ripples: true }));
+    assert.doesNotThrow(() => new RainEngine(100, { ripples: false }));
+});
+
+test('R3 doors 6/6: gust/gustRate/floorY/splashDroplets/ripples violations throw specifically a RangeError naming the key', () => {
+    const cases = [
+        [{ gust: NaN }, 'gust'],
+        [{ gustRate: Infinity }, 'gustRate'],
+        [{ floorY: NaN }, 'floorY'],
+        [{ splashDroplets: 2.5 }, 'splashDroplets'],
+        [{ splashDroplets: 4 }, 'splashDroplets'],
+        [{ splashDroplets: -1 }, 'splashDroplets'],
+        [{ ripples: 1 }, 'ripples'],
+    ];
+    for (const [cfg, key] of cases) {
+        assert.throws(() => new RainEngine(100, cfg), (err) => {
+            assert.ok(err instanceof RangeError,
+                'expected a RangeError for ' + JSON.stringify(cfg) + ', got ' + err.constructor.name);
+            assert.ok(String(err.message).includes(key),
+                'message did not name "' + key + '": ' + err.message);
+            return true;
+        }, 'config=' + JSON.stringify(cfg));
+    }
+});
+
+test('R3 floorY: with floorY:400 at h:600, every state-2 particle is at y<=400+eps, at least one splash lands exactly at the line, and zero splashes land at y===600', () => {
+    const FLOOR = 400, H = 600, EPS = 1e-3;
+    const e = new RainEngine(50, { gravity: 5000, density: 100, floorY: FLOOR, color: '#fff' });
+    e.spawn(0.016, 800, H);
+    let splashAtLine = false;
+    let splashAtH = false;
+    for (let f = 0; f < 60; f++) {
+        e.updateAndDraw(ctx, 0.016, 800, H);
+        for (let i = 0; i < e.max; i++) {
+            if (e.state[i] === 2) {
+                if (e.y[i] === FLOOR) splashAtLine = true;
+                if (e.y[i] === H) splashAtH = true;
+            }
+        }
+    }
+    assert.ok(splashAtLine, 'no splash landed exactly at floorY=' + FLOOR);
+    assert.equal(splashAtH, false, 'a splash landed at the frame height h=' + H + ' instead of floorY=' + FLOOR);
+    for (let i = 0; i < e.max; i++) {
+        if (e.state[i] === 2) {
+            assert.ok(e.y[i] <= FLOOR + EPS, 'state-2 particle below floorY at ' + i + ': y=' + e.y[i]);
+        }
+    }
+});
+
+test('R3 ripples: ring buffers allocated (len 64) only when ripples:true; null otherwise; nulled on destroy', () => {
+    const off = new RainEngine(50, { ripples: false, color: '#fff' });
+    assert.equal(off._rippleX, null);
+    assert.equal(off._rippleR, null);
+    assert.equal(off._rippleLife, null);
+
+    const on = new RainEngine(50, { ripples: true, color: '#fff' });
+    assert.ok(on._rippleX instanceof Float32Array && on._rippleX.length === 64);
+    assert.ok(on._rippleR instanceof Float32Array && on._rippleR.length === 64);
+    assert.ok(on._rippleLife instanceof Float32Array && on._rippleLife.length === 64);
+    on.destroy();
+    assert.equal(on._rippleX, null);
+    assert.equal(on._rippleR, null);
+    assert.equal(on._rippleLife, null);
+});
+
+test('R3 floorY: splashes land on floorY, not the frame height h', () => {
+    const FLOOR = 300;
+    const e = new RainEngine(50, { gravity: 5000, density: 100, floorY: FLOOR, color: '#fff' });
+    e.spawn(0.016, 800, 600);
+    let splashY = -1;
+    for (let f = 0; f < 60; f++) {
+        e.updateAndDraw(ctx, 0.016, 800, 600);
+        for (let i = 0; i < e.max; i++) {
+            // A drop that JUST transitioned this frame sits exactly at the floor line.
+            if (e.state[i] === 2 && e.y[i] === FLOOR) { splashY = e.y[i]; break; }
+        }
+        if (splashY >= 0) break;
+    }
+    assert.equal(splashY, FLOOR, 'no splash landed exactly on floorY=' + FLOOR);
+    // And no live particle ever sits below the floor line.
+    for (let i = 0; i < e.max; i++) {
+        if (e.state[i] !== 0) assert.ok(e.y[i] <= FLOOR + 1e-3, 'particle below floorY at ' + i);
+    }
+});
+
+test('R3 splashDroplets: a controlled impact emits exactly N extra state-2 particles', () => {
+    function impactCount(droplets) {
+        const e = new RainEngine(10, {
+            splashDroplets: droplets, gravity: 1500, wind: 0, color: '#fff', rng: () => 0.5,
+        });
+        e.state[0] = 1; e.z[0] = 1; e.gz[0] = 1500; e.wz[0] = 0;
+        e.vx[0] = 0; e.vy[0] = 500; e.x[0] = 400; e.y[0] = 599;
+        e.life[0] = 12; e.bucket[0] = 2; e.tailMult[0] = 0;
+        e.updateAndDraw(ctx, 0.016, 800, 600);
+        let s2 = 0;
+        for (let i = 0; i < e.max; i++) if (e.state[i] === 2) s2++;
+        return s2;
+    }
+    assert.equal(impactCount(0), 1, 'droplets:0 should yield only the impacting drop');
+    assert.equal(impactCount(3), 4, 'droplets:3 should yield the drop + 3 emitted droplets');
+    assert.equal(impactCount(1), 2, 'droplets:1 should yield the drop + 1 droplet');
+});
+
+test('R3 gust: gust:0 (spelled) is byte-identical to an engine built without the gust keys', () => {
+    const cfg = { density: 20, gravity: 1500, wind: 300, color: '#fff' };
+    const a = new RainEngine(300, { ...cfg, gust: 0, gustRate: Math.fround(Math.PI * 2 / 3), rng: seededRng(4242) });
+    const b = new RainEngine(300, { ...cfg, rng: seededRng(4242) });
+    for (let f = 0; f < 200; f++) {
+        a.spawn(0.016, 800, 600); a.updateAndDraw(ctx, 0.016, 800, 600);
+        b.spawn(0.016, 800, 600); b.updateAndDraw(ctx, 0.016, 800, 600);
+    }
+    assert.ok(a.liveCount() > 0 && a.liveCount() < a.max);
+    for (let i = 0; i < a.max; i++) {
+        assert.equal(a.x[i], b.x[i], 'x mismatch at ' + i);
+        assert.equal(a.vx[i], b.vx[i], 'vx mismatch at ' + i);
+        assert.equal(a.state[i], b.state[i], 'state mismatch at ' + i);
+    }
+});
+
+test('R3 gust: a live gust perturbs vx away from the gust-off baseline', () => {
+    const cfg = { density: 20, gravity: 1500, wind: 300, color: '#fff' };
+    const off = new RainEngine(300, { ...cfg, gust: 0, rng: seededRng(77) });
+    const on = new RainEngine(300, { ...cfg, gust: 400, rng: seededRng(77) });
+    for (let f = 0; f < 120; f++) {
+        off.spawn(0.016, 800, 600); off.updateAndDraw(ctx, 0.016, 800, 600);
+        on.spawn(0.016, 800, 600); on.updateAndDraw(ctx, 0.016, 800, 600);
+    }
+    let differ = 0;
+    for (let i = 0; i < off.max; i++) {
+        if (off.state[i] === 1 && on.state[i] === 1 && off.vx[i] !== on.vx[i]) differ++;
+    }
+    assert.ok(differ > 0, 'a live gust left vx identical to the gust-off run');
+});
+
+test('R3 presets: every RAIN_PRESETS entry constructs and runs; the object is frozen', () => {
+    assert.ok(Object.isFrozen(RAIN_PRESETS));
+    for (const name of ['drizzle', 'steady', 'downpour', 'storm']) {
+        const preset = RAIN_PRESETS[name];
+        assert.ok(preset, 'missing preset ' + name);
+        const e = new RainEngine(500, { ...preset, color: '#fff' });
+        assert.doesNotThrow(() => {
+            for (let f = 0; f < 60; f++) { e.spawn(0.016, 800, 600); e.updateAndDraw(ctx, 0.016, 800, 600); }
+        }, 'preset ' + name + ' threw during run');
+        assert.ok(e.liveCount() >= 0 && e.liveCount() <= e.max);
+        e.destroy();
+    }
+});
+
+test('R3 presets: every RAIN_PRESETS entry constructs without throwing and runs >=200 frames with liveCount() < max', () => {
+    for (const name of ['drizzle', 'steady', 'downpour', 'storm']) {
+        const preset = RAIN_PRESETS[name];
+        let e;
+        assert.doesNotThrow(() => { e = new RainEngine(500, { ...preset, color: '#fff' }); },
+            'preset ' + name + ' threw during construction');
+        assert.doesNotThrow(() => {
+            for (let f = 0; f < 200; f++) { e.spawn(0.016, 800, 600); e.updateAndDraw(ctx, 0.016, 800, 600); }
+        }, 'preset ' + name + ' threw during a >=200-frame run');
+        assert.ok(e.liveCount() < e.max,
+            'preset ' + name + ' pinned the pool at max after 200 frames (' + e.liveCount() + '/' + e.max + ')');
+        e.destroy();
+    }
+});
+
+test('R3 presets: storm carries a slanted angle and a live gust', () => {
+    assert.ok(RAIN_PRESETS.storm.angle !== null && Number.isFinite(RAIN_PRESETS.storm.angle));
+    assert.ok(RAIN_PRESETS.storm.gust > 0);
+    assert.ok(RAIN_PRESETS.storm.wind > RAIN_PRESETS.drizzle.wind);
 });

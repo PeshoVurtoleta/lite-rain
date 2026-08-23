@@ -31,11 +31,29 @@ export interface RainConfig {
     splashScale?: number;
     /** Fixed rain angle in radians. null = gravity + wind (natural). Finite when non-null. Default: null */
     angle?: number | null;
+    /** Wind-gust amplitude (px/s per step). 0 = off. Must be finite. Default: 0 */
+    gust?: number;
+    /** Gust oscillator frequency in rad/s. Must be finite. Default: fround(2*PI/3) (~3s period) */
+    gustRate?: number;
+    /** Splash floor Y in px. null = use the frame height h. Finite when non-null. Default: null */
+    floorY?: number | null;
+    /** Extra droplets emitted per splash impact. Integer in [0, 3]. Default: 0 */
+    splashDroplets?: number;
+    /** Draw expanding ground ripple rings at each impact. Strict boolean. Default: false */
+    ripples?: boolean;
     /** Rain color as OKLCH object { l, c, h } or CSS string. Default: 'oklch(0.95 0.05 250)' */
     color?: { l: number; c: number; h: number } | string;
     /** Random number generator () => number [0, 1). Default: Math.random */
     rng?: () => number;
 }
+
+/** Named partial-config presets. Spread into `new RainEngine(max, { ...preset })`. */
+export declare const RAIN_PRESETS: {
+    readonly drizzle: Readonly<RainConfig>;
+    readonly steady: Readonly<RainConfig>;
+    readonly downpour: Readonly<RainConfig>;
+    readonly storm: Readonly<RainConfig>;
+};
 
 export declare class RainEngine {
     readonly max: number;

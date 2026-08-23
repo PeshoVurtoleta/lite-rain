@@ -73,8 +73,8 @@ export function check(cond, msgThunk) {
 export function makeCtx() {
     return {
         globalAlpha: 1, lineWidth: 1, strokeStyle: '', fillStyle: '', lineCap: '',
-        beginPath() {}, moveTo() {}, lineTo() {}, arc() {}, stroke() {}, fill() {},
-        clearRect() {},
+        beginPath() {}, moveTo() {}, lineTo() {}, arc() {}, ellipse() {},
+        stroke() {}, fill() {}, clearRect() {},
     };
 }
 

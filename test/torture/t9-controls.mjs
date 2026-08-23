@@ -13,6 +13,7 @@
 import { RainEngine } from '../../RainEngine.js';
 import { runOpsGate, die, makeCtx, makePrng, SEED } from './harness.mjs';
 import { makeLogCtx, refRender, sortedEqual } from './t5-fuzz.mjs';
+import { runGoldenScenario, buildOffEngine, loadGolden } from './t8-determinism.mjs';
 
 /** Retained sink so the control's allocations survive GC (arrayBuffers grows). */
 const leak = [];
@@ -169,6 +170,65 @@ export function run() {
         if (sortedEqual(forged, refLog)) {
             die('T9 control: the draw-set comparison accepted a binned render that drew a ' +
                 'culled drop -- the T5 draw-set gate cannot fail');
+        }
+    }
+
+    // Control 7 -- the T8 OFF-path golden must DETECT the exact pool mutation the
+    // splashDroplets/ripple gates prevent. First prove the golden's honest baseline:
+    // a clean R3 OFF run reproduces the committed v1.2.0 bytes. Then run the SAME
+    // scenario with a spurious injected emit (one state-2 slot forced + the spawn
+    // cursor advanced on a single frame -- exactly what an UNGATED droplet path would
+    // do at splashDroplets:0) and assert the snapshot FAILS the golden. A golden that
+    // still matches after a real mutation is decorative.
+    {
+        const golden = loadGolden();
+        const keys = ['x', 'y', 'vx', 'vy', 'state', 'life'];
+
+        // Honest baseline: clean OFF run == the committed v1.2.0 golden.
+        const clean = runGoldenScenario(buildOffEngine());
+        let baselineMatches = true;
+        for (let k = 0; k < keys.length; k++) if (clean[keys[k]] !== golden.buffers[keys[k]]) baselineMatches = false;
+        if (!baselineMatches) {
+            die('T9 control: a clean R3 OFF run does NOT match the v1.2.0 golden -- the golden ' +
+                'has no honest baseline, so its sensitivity check is meaningless');
+        }
+
+        // Inject the mutation the gate forbids: force one droplet-like emit on frame
+        // 200 (occupy a free slot as state 2 + advance _spawnCursor, perturbing all
+        // subsequent spawn slot assignment).
+        let forced = false;
+        const inject = (e, f) => {
+            if (f !== 200) return;
+            let cur = e._spawnCursor;
+            for (let n = 0; n < e.max; n++) {
+                const cand = cur;
+                cur = cur + 1; if (cur >= e.max) cur = 0;
+                if (e.state[cand] === 0) {
+                    e.state[cand] = 2;
+                    e.z[cand] = 0.5; e.gz[cand] = 750; e.x[cand] = 400; e.y[cand] = 600;
+                    e.vx[cand] = 10; e.vy[cand] = -10; e.radius[cand] = 1; e.life[cand] = 0.2;
+                    forced = true;
+                    break;
+                }
+            }
+            e._spawnCursor = cur;
+        };
+        const mutated = runGoldenScenario(buildOffEngine(), inject);
+        // The inject hook must have actually found a free (state-0) slot on frame
+        // 200 -- if the scenario is ever tuned toward saturation and no free slot
+        // exists, the mutation silently no-ops and the divergence check below would
+        // pass FOR THE WRONG REASON (no injection happened at all, not "the golden
+        // caught it"). Fail loudly instead of masking that.
+        if (!forced) {
+            die('T9 control: frame 200 had no free (state-0) slot to force -- the inject ' +
+                'scenario is saturated and the mutation control is a silent no-op, not a real test');
+        }
+        let detected = false;
+        for (let k = 0; k < keys.length; k++) if (mutated[keys[k]] !== golden.buffers[keys[k]]) detected = true;
+        if (!detected) {
+            die('T9 control: an injected pool mutation (spurious emit + cursor advance) stayed ' +
+                'byte-identical to the v1.2.0 golden -- the T8 OFF golden cannot detect the very ' +
+                'mutation the splashDroplets/ripple gates exist to prevent');
         }
     }
 }

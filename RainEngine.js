@@ -6,7 +6,7 @@
 
 import { toCssOklch } from '@zakkster/lite-color';
 
-export const VERSION = '1.2.0';
+export const VERSION = '1.3.0';
 
 /** Documented ceiling for maxParticles. Above this, the constructor throws. */
 export const MAX_PARTICLES = 2000000;
@@ -23,10 +23,26 @@ export const MAX_PARTICLES = 2000000;
  */
 const MAX_FALL_LIFE = 12;
 
+/**
+ * Default angular frequency (rad/s) of the wind gust oscillator. 2*PI/3 gives a
+ * ~3s swell period. The constructor default gustRate is `Math.fround(GUST_HZ)` so
+ * a Float32-round-tripped read of the phase term is numerically identical.
+ */
+const TAU = Math.PI * 2;
+const GUST_HZ = TAU / 3;
+
+/** Ripple ring geometry (module consts, not config). */
+const RIPPLE_SLOTS = 64;         // ring capacity; index with & RIPPLE_MASK
+const RIPPLE_MASK = RIPPLE_SLOTS - 1;
+const RIPPLE_LIFE0 = 0.6;        // seconds a ground ripple ring lives
+const RIPPLE_R0 = 2;             // initial ring radius px (scaled by drop depth)
+const RIPPLE_GROWTH = 60;        // px/s ring expansion
+
 /** Config keys that must be finite numbers. Validated once, at construction. */
 const FINITE_KEYS = [
     'gravity', 'wind', 'maxSpeed', 'blurStrength', 'splashBounce',
-    'splashSpread', 'splashLifeMin', 'splashLifeMax', 'density', 'splashScale'
+    'splashSpread', 'splashLifeMin', 'splashLifeMax', 'density', 'splashScale',
+    'gust', 'gustRate'
 ];
 
 /** Inline finite predicate -- no runtime dep. NaN, +/-Infinity and non-numbers fail. */
@@ -54,6 +70,11 @@ export class RainEngine {
             splashLifeMax: 0.3,
             splashScale: 1.2,     // R-10: splash base radius scalar (was hardcoded 1.2)
             angle: null,
+            gust: 0,                          // R3: wind-gust amplitude (0 = off)
+            gustRate: Math.fround(GUST_HZ),   // R3: gust oscillator frequency rad/s
+            floorY: null,                     // R3: splash floor Y; null = use h
+            splashDroplets: 0,                // R3: extra droplets per impact (0..3)
+            ripples: false,                   // R3: ground ripple rings (strict bool)
             color: 'oklch(0.95 0.05 250)',
             rng: Math.random,
             ...config
@@ -74,6 +95,24 @@ export class RainEngine {
             throw new RangeError(
                 'RainEngine: config.angle must be a finite number or null, got ' +
                 this.config.angle);
+        }
+        // R3 doors. floorY is null-or-finite (null = "use h"); splashDroplets is an
+        // integer in 0..3; ripples is a STRICT boolean (a truthy non-bool is a bug,
+        // not a yes). gust/gustRate finiteness is enforced by FINITE_KEYS above.
+        if (this.config.floorY !== null && !isFiniteNumber(this.config.floorY)) {
+            throw new RangeError(
+                'RainEngine: config.floorY must be a finite number or null, got ' +
+                this.config.floorY);
+        }
+        if (!Number.isInteger(this.config.splashDroplets) ||
+            this.config.splashDroplets < 0 || this.config.splashDroplets > 3) {
+            throw new RangeError(
+                'RainEngine: config.splashDroplets must be an integer in [0, 3], got ' +
+                this.config.splashDroplets);
+        }
+        if (typeof this.config.ripples !== 'boolean') {
+            throw new RangeError(
+                'RainEngine: config.ripples must be a boolean, got ' + this.config.ripples);
         }
 
         this.colorStr = typeof this.config.color === 'string' ? this.config.color : toCssOklch(this.config.color);
@@ -123,6 +162,25 @@ export class RainEngine {
             { id: 1, zAvg: 0.55 },
             { id: 2, zAvg: 0.9 }
         ];
+
+        // R3: frame-time accumulator for the gust oscillator. Advances every frame
+        // UNCONDITIONALLY (determinism contract: the phase clock is not gated on the
+        // feature; only the READ that consumes it is). Never a config knob.
+        this._elapsed = 0;
+
+        // R3: ground-ripple ring. Pre-allocated at construction ONLY when the
+        // feature is on, so the OFF path carries no ripple buffers at all and the
+        // three fields stay null (the draw/write gates test `!== null`). Never grows.
+        if (this.config.ripples === true) {
+            this._rippleX = new Float32Array(RIPPLE_SLOTS);
+            this._rippleR = new Float32Array(RIPPLE_SLOTS);
+            this._rippleLife = new Float32Array(RIPPLE_SLOTS);
+        } else {
+            this._rippleX = null;
+            this._rippleR = null;
+            this._rippleLife = null;
+        }
+        this._rippleHead = 0;
     }
 
     spawn(dt, w, h) {
@@ -232,6 +290,23 @@ export class RainEngine {
         const rng = this.config.rng;
         const invSplashLifeMax = 1.0 / splashLifeMax;
 
+        // R3 hoists. `fy` folds floorY into the floor local: null -> the existing h.
+        const gust = this.config.gust;
+        const gustRate = this.config.gustRate;
+        const floorY = this.config.floorY;
+        const splashDroplets = this.config.splashDroplets;
+        const fy = floorY !== null ? floorY : h;
+        const rippleX = this._rippleX; // null when the feature is off
+        const rippleR = this._rippleR;
+        const rippleLife = this._rippleLife;
+        const max = this.max;
+
+        // Advance the gust phase clock ONCE per frame, unconditionally. The feature
+        // READ below is guarded; the accumulator is not (determinism contract).
+        this._elapsed += dt;
+        let windPulse = 0;
+        if (gust !== 0) windPulse = Math.sin(this._elapsed * gustRate) * gust * dt;
+
         // R-08: bind the persistent bin lists to locals and reset their counts at
         // frame top. Each drop's index is appended AFTER its transitions resolve,
         // keyed on its FINAL state this frame -- state 0 (culled/aged) is not binned.
@@ -250,6 +325,8 @@ export class RainEngine {
                 if (angled === false) {
                     this.vx[i] += this.wz[i] * 0.5 * dt;
                 }
+                // R3 gust: a frame-constant horizontal pulse (0 when gust is off).
+                this.vx[i] += windPulse;
 
                 this.vy[i] += this.gz[i] * dt;
 
@@ -260,8 +337,8 @@ export class RainEngine {
                 this.x[i] += this.vx[i] * dt;
                 this.y[i] += this.vy[i] * dt;
 
-                if (this.y[i] >= h) {
-                    this.y[i] = h;
+                if (this.y[i] >= fy) {
+                    this.y[i] = fy;
                     this.state[i] = 2;
 
                     // R-10: splashScale replaces the hardcoded 1.2 base (default 1.2
@@ -272,6 +349,49 @@ export class RainEngine {
                     this.life[i] = splashLifeMin + rng() * (splashLifeMax - splashLifeMin);
                     // Final state 2 this frame -> splash list.
                     splashIdx[cs++] = i;
+
+                    // R3 droplets. Emit N tiny state-2 particles into free slots via
+                    // the shared spawn ring. The _spawnCursor read/write is STRICTLY
+                    // inside this guard so the OFF path (splashDroplets === 0) never
+                    // perturbs slot assignment -> bit-identical to v1.2.0. A droplet
+                    // landing at a slot the physics pass has ALREADY passed (j <= i)
+                    // is binned here; one landing ahead (j > i) is left for the main
+                    // loop to bin -- so every state-2 slot is binned EXACTLY once and
+                    // the full-scan render (T5) still matches.
+                    if (splashDroplets !== 0) {
+                        let cur = this._spawnCursor;
+                        for (let d = 0; d < splashDroplets; d++) {
+                            let j = -1;
+                            for (let n = 0; n < max; n++) {
+                                const cand = cur;
+                                cur = cur + 1; if (cur >= max) cur = 0;
+                                if (this.state[cand] === 0) { j = cand; break; }
+                            }
+                            if (j === -1) break; // no free slot -> respect max
+                            this.state[j] = 2;
+                            this.z[j] = this.z[i];
+                            this.gz[j] = this.gz[i];
+                            this.x[j] = this.x[i];
+                            this.y[j] = fy;
+                            this.vx[j] = (rng() - 0.5) * splashSpread * this.z[i];
+                            this.vy[j] = this.vy[i] * rng();
+                            this.radius[j] = this.z[i] * splashScale * 0.5;
+                            this.life[j] = splashLifeMin + rng() * (splashLifeMax - splashLifeMin);
+                            if (j <= i) splashIdx[cs++] = j;
+                        }
+                        this._spawnCursor = cur;
+                    }
+
+                    // R3 ripples. Record the impact into the pre-allocated ring; the
+                    // draw happens AFTER the splash loop, fully independent of the
+                    // pool. Gate on the ring being non-null (feature on).
+                    if (rippleX !== null) {
+                        const head = this._rippleHead;
+                        rippleX[head] = this.x[i];
+                        rippleR[head] = RIPPLE_R0 * this.z[i];
+                        rippleLife[head] = RIPPLE_LIFE0;
+                        this._rippleHead = (head + 1) & RIPPLE_MASK;
+                    }
                 } else if (!(this.x[i] >= -200 && this.x[i] <= w + 200 && this.y[i] >= -200)) {
                     // FIX R-01: after integration, cull a state-1 drop that left the
                     // simulable region (snow's 200px margins) back to free. Floor
@@ -304,7 +424,7 @@ export class RainEngine {
                 this.vy[i] += this.gz[i] * dt;
                 this.x[i] += this.vx[i] * dt;
                 this.y[i] += this.vy[i] * dt;
-                if (this.y[i] > h) this.y[i] = h;
+                if (this.y[i] > fy) this.y[i] = fy;
                 // Still a splash this frame -> splash list.
                 splashIdx[cs++] = i;
             }
@@ -343,8 +463,30 @@ export class RainEngine {
             const i = splashIdx[k];
             ctx.globalAlpha = (this.life[i] * invSplashLifeMax) * this.z[i];
             ctx.beginPath();
-            ctx.arc(this.x[i], this.y[i], this.radius[i], 0, Math.PI * 2);
+            ctx.arc(this.x[i], this.y[i], this.radius[i], 0, TAU);
             ctx.fill();
+        }
+
+        // --- 3. GROUND RIPPLES (independent of the pool; one path) ---
+        // Age every live ring, expand its radius, and stroke ALL of them in a single
+        // beginPath()/stroke(). Gated on the ring being allocated (feature on).
+        if (rippleX !== null) {
+            ctx.globalAlpha = 0.35;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let k = 0; k < RIPPLE_SLOTS; k++) {
+                let lifeK = rippleLife[k];
+                if (lifeK <= 0) continue;
+                lifeK -= dt;
+                if (lifeK <= 0) { rippleLife[k] = 0; continue; }
+                rippleLife[k] = lifeK;
+                const r = rippleR[k] + RIPPLE_GROWTH * dt;
+                rippleR[k] = r;
+                const rx = rippleX[k];
+                ctx.moveTo(rx + r, fy);
+                ctx.ellipse(rx, fy, r, r * 0.3, 0, 0, TAU);
+            }
+            ctx.stroke();
         }
 
         ctx.globalAlpha = 1.0;
@@ -376,5 +518,22 @@ export class RainEngine {
         this.radius = null; this.tailMult = null; this.life = null; this.state = null;
         // Release the R-08 bin scratch too.
         this._streakIdx = null; this._streakCount = null; this._splashIdx = null;
+        // R3: release the ripple ring.
+        this._rippleX = null; this._rippleR = null; this._rippleLife = null;
     }
 }
+
+/**
+ * R3 presets. Partial configs spread into `new RainEngine(max, { ...preset })`;
+ * every value is finite and passes the constructor door. `storm` is the showcase:
+ * high wind, a slanted fixed angle, and a live wind gust. Frozen (and each nested
+ * config frozen) so a preset cannot be mutated in place.
+ */
+export const RAIN_PRESETS = Object.freeze({
+    drizzle: Object.freeze({ gravity: 900, wind: 80, density: 2, maxSpeed: 1500 }),
+    steady: Object.freeze({ gravity: 1500, wind: 200, density: 5 }),
+    downpour: Object.freeze({ gravity: 2000, wind: 350, density: 14, splashSpread: 260 }),
+    storm: Object.freeze({
+        gravity: 2200, wind: 1200, angle: 0.4, gust: 300, density: 22, splashSpread: 320,
+    }),
+});

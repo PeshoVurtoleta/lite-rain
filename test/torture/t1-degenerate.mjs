@@ -75,7 +75,7 @@ export function run() {
 
     // --- the door: non-finite config throws naming the key --------------------
     const finiteKeys = ['gravity', 'wind', 'maxSpeed', 'blurStrength', 'splashBounce',
-        'splashSpread', 'splashLifeMin', 'splashLifeMax', 'density'];
+        'splashSpread', 'splashLifeMin', 'splashLifeMax', 'density', 'gust', 'gustRate'];
     const bad = [NaN, Infinity, -Infinity];
     for (let k = 0; k < finiteKeys.length; k++) {
         const key = finiteKeys[k];
@@ -102,4 +102,46 @@ export function run() {
     try { new RainEngine(100, { angle: null }); new RainEngine(100, { angle: -Math.PI / 2 }); }
     catch { angleOk = false; }
     check(angleOk, () => 'T1: a valid angle (null or finite) was rejected');
+
+    // --- R3 doors -------------------------------------------------------------
+    // floorY: null-or-finite. null and a finite value pass; non-finite throws.
+    for (let b = 0; b < bad.length; b++) {
+        let threw = false, named = false;
+        try { new RainEngine(100, { floorY: bad[b] }); }
+        catch (err) { threw = true; named = String(err.message).includes('floorY'); }
+        check(threw, () => 'T1: config.floorY=' + bad[b] + ' was accepted (door open)');
+        check(named, () => 'T1: throw for config.floorY did not name the key');
+    }
+    let floorOk = true;
+    try { new RainEngine(100, { floorY: null }); new RainEngine(100, { floorY: 400 }); new RainEngine(100, { floorY: -5 }); }
+    catch { floorOk = false; }
+    check(floorOk, () => 'T1: a valid floorY (null or finite) was rejected');
+
+    // splashDroplets: integer in [0, 3]. Non-integers and out-of-range throw.
+    const badDroplets = [2.5, 4, -1, NaN, Infinity, 1.0001];
+    for (let b = 0; b < badDroplets.length; b++) {
+        let threw = false, named = false;
+        try { new RainEngine(100, { splashDroplets: badDroplets[b] }); }
+        catch (err) { threw = true; named = String(err.message).includes('splashDroplets'); }
+        check(threw, () => 'T1: config.splashDroplets=' + badDroplets[b] + ' was accepted (door open)');
+        check(named, () => 'T1: throw for config.splashDroplets did not name the key');
+    }
+    let dropletsOk = true;
+    try { for (let n = 0; n <= 3; n++) new RainEngine(100, { splashDroplets: n }); }
+    catch { dropletsOk = false; }
+    check(dropletsOk, () => 'T1: a valid splashDroplets (0..3) was rejected');
+
+    // ripples: STRICT boolean. A truthy/falsy non-boolean throws naming the key.
+    const badRipples = [1, 0, 'true', null, {}, NaN];
+    for (let b = 0; b < badRipples.length; b++) {
+        let threw = false, named = false;
+        try { new RainEngine(100, { ripples: badRipples[b] }); }
+        catch (err) { threw = true; named = String(err.message).includes('ripples'); }
+        check(threw, () => 'T1: config.ripples=' + String(badRipples[b]) + ' was accepted (not a strict boolean)');
+        check(named, () => 'T1: throw for config.ripples did not name the key');
+    }
+    let ripplesOk = true;
+    try { new RainEngine(100, { ripples: true }); new RainEngine(100, { ripples: false }); }
+    catch { ripplesOk = false; }
+    check(ripplesOk, () => 'T1: a valid ripples (true/false) was rejected');
 }

@@ -1,4 +1,4 @@
-# @zakkster/lite-rain v1.2.0
+# @zakkster/lite-rain v1.3.0
 
 > Zero-GC SoA environmental rain engine. Z-depth parallax, streak physics, splash metamorphosis, bucketed rendering. One dependency.
 

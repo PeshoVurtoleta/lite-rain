@@ -21,7 +21,7 @@
  * allocate freely: the log arrays and record strings are diagnostic scaffolding.
  */
 
-import { RainEngine } from '../../RainEngine.js';
+import { RainEngine, RAIN_PRESETS } from '../../RainEngine.js';
 import { SEED, makePrng, check } from './harness.mjs';
 
 /** Age-cap ceiling (MAX_FALL_LIFE in RainEngine.js); a streak's life stays in (0, cap]. */
@@ -46,6 +46,10 @@ export function makeLogCtx(log) {
         arc(x, y, r) {
             log.push('P ga=' + this.globalAlpha + ' ' + x + ',' + y + ' r=' + r);
         },
+        // Ripple rings stroke via ellipse; the draw-set comparison is over streaks
+        // (moveTo/lineTo) and splashes (arc) only, so ellipse is an unlogged no-op --
+        // ripples are an independent overlay, not part of the pool's draw set.
+        ellipse() {},
     };
 }
 
@@ -95,6 +99,8 @@ export function sortedEqual(a, b) {
 
 /** The independent oracle: every live drop finite and on a plausible trajectory. */
 function oracle(e, w, h, op) {
+    // R3: the floor line is floorY when set, else h (mirrors the engine's `fy`).
+    const fy = e.config.floorY !== null ? e.config.floorY : h;
     for (let i = 0; i < e.max; i++) {
         const s = e.state[i];
         if (s === 0) continue;
@@ -113,18 +119,18 @@ function oracle(e, w, h, op) {
             check(x >= -200 && x <= w + 200 && y >= -200,
                 () => 'T5 oracle: streak left the region uncauled at slot ' + i +
                       ' op ' + op + ' (x=' + x + ' y=' + y + ' w=' + w + ')');
-            check(y < h,
+            check(y < fy,
                 () => 'T5 oracle: streak at/below floor should have splashed at slot ' +
-                      i + ' op ' + op + ' (y=' + y + ' h=' + h + ')');
+                      i + ' op ' + op + ' (y=' + y + ' fy=' + fy + ')');
             check(life > 0 && life <= LIFE_CAP + EPS,
                 () => 'T5 oracle: streak life out of (0, cap] at slot ' + i + ' op ' +
                       op + ' (life=' + life + ')');
         } else {
             check(life > 0,
                 () => 'T5 oracle: expired splash not recycled at slot ' + i + ' op ' + op);
-            check(y <= h + EPS,
+            check(y <= fy + EPS,
                 () => 'T5 oracle: splash below floor at slot ' + i + ' op ' + op +
-                      ' (y=' + y + ' h=' + h + ')');
+                      ' (y=' + y + ' fy=' + fy + ')');
         }
     }
 }
@@ -177,6 +183,13 @@ export function run() {
         ['zero gravity + wind', { gravity: 0, wind: 6000, density: 15 }],
         ['angled', { angle: Math.PI / 5, gravity: 1500, wind: 500, density: 20 }],
         ['frozen field', { gravity: 0, wind: 0, density: 15 }],
+        // R3 scenarios. gust storm exercises the oscillating windPulse on angled
+        // rain; droplets/ripples exercise the two guarded cold blocks; floorY places
+        // the splash line above the frame bottom (250 < every SIZES height).
+        ['gust storm', { ...RAIN_PRESETS.storm }],
+        ['droplets', { gravity: 1800, wind: 300, density: 18, splashDroplets: 3 }],
+        ['ripples', { gravity: 1800, wind: 300, density: 18, ripples: true }],
+        ['floorY', { gravity: 1800, wind: 200, density: 18, floorY: 250 }],
     ];
     for (let s = 0; s < scenarios.length; s++) {
         const prngCtl = makePrng((SEED ^ (0x1000 + s * 0x77)) >>> 0);

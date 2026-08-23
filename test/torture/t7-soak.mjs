@@ -46,7 +46,15 @@ export async function run() {
     const gc = new GcProfiler().start();
 
     for (let c = 0; c < CYCLES; c++) {
-        const e = new RainEngine(MAX, { density: 5, gravity: 1500, wind: 300, color: '#fff' });
+        // Alternate a plain engine with an all-R3-features-ON engine so the ripple
+        // ring (allocated only when ripples:true) is built and torn down across
+        // cycles -- its buffers must be reclaimed too, not outlive the engine.
+        const e = (c & 1) === 0
+            ? new RainEngine(MAX, { density: 5, gravity: 1500, wind: 300, color: '#fff' })
+            : new RainEngine(MAX, {
+                density: 5, gravity: 1500, wind: 300, color: '#fff',
+                gust: 250, splashDroplets: 3, ripples: true, floorY: 560,
+            });
         // cleanup is a module-level fn and the tag is a primitive: neither closes
         // over `e`, so finalization is never defeated.
         tracker.track(e, noop, c, { audit: true });
